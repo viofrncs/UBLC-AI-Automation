@@ -1,86 +1,64 @@
-const { google } = require('googleapis');
+// Mock data service - no Google Sheets dependency
 require('dotenv').config();
 
-// Google Sheets configuration
-const SHEET_ID = process.env.GOOGLE_SHEET_ID;
-const sheets = google.sheets('v4');
-
-// Create auth client
-async function getAuthClient() {
-  try {
-    const auth = new google.auth.GoogleAuth({
-      credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY),
-      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-    });
-    return await auth.getClient();
-  } catch (error) {
-    console.error('Google Auth Error:', error.message);
-    throw new Error('Failed to authenticate with Google Sheets. Check your GOOGLE_SERVICE_ACCOUNT_KEY in .env');
+// Mock book data
+const mockBooks = [
+  {
+    bookId: "B001",
+    title: "Programming in C",
+    author: "Dennis Ritchie",
+    copies_available: 5,
+    location: "2nd Floor - Section A",
+    category: "Programming"
+  },
+  {
+    bookId: "B002",
+    title: "Data Structures and Algorithms",
+    author: "Robert Sedgewick",
+    copies_available: 3,
+    location: "2nd Floor - Section A",
+    category: "Computer Science"
+  },
+  {
+    bookId: "B003",
+    title: "Introduction to Database Systems",
+    author: "C.J. Date",
+    copies_available: 4,
+    location: "2nd Floor - Section B",
+    category: "Database"
+  },
+  {
+    bookId: "B004",
+    title: "Computer Networks",
+    author: "Andrew Tanenbaum",
+    copies_available: 5,
+    location: "2nd Floor - Section B",
+    category: "Networking"
+  },
+  {
+    bookId: "B005",
+    title: "Artificial Intelligence",
+    author: "Stuart Russell",
+    copies_available: 7,
+    location: "3rd Floor - Section C",
+    category: "AI/ML"
   }
-}
+];
 
-// Read all books from Google Sheets
+// Mock reservations storage
+let mockReservations = [];
+
+// Read all books
 async function readBooks() {
-  try {
-    const auth = await getAuthClient();
-    const response = await sheets.spreadsheets.values.get({
-      auth,
-      spreadsheetId: SHEET_ID,
-      range: 'Books!A2:F', // Skip header row, read columns A-F
-    });
-
-    const rows = response.data.values || [];
-    return rows.map(row => ({
-      bookId: row[0] || '',
-      title: row[1] || '',
-      author: row[2] || '',
-      copies_available: parseInt(row[3]) || 0,
-      location: row[4] || '',
-      category: row[5] || ''
-    }));
-  } catch (error) {
-    console.error('Error reading books from Google Sheets:', error.message);
-    throw error;
-  }
+  console.log('📚 Using mock book data');
+  return mockBooks;
 }
 
-// Write books back to Google Sheets
-async function writeBooks(books) {
-  try {
-    const auth = await getAuthClient();
-    
-    // Convert books array to 2D array for Sheets
-    const values = books.map(book => [
-      book.bookId,
-      book.title,
-      book.author,
-      book.copies_available,
-      book.location,
-      book.category
-    ]);
-
-    await sheets.spreadsheets.values.update({
-      auth,
-      spreadsheetId: SHEET_ID,
-      range: 'Books!A2:F',
-      valueInputOption: 'RAW',
-      resource: { values }
-    });
-
-    console.log('✅ Books updated in Google Sheets');
-  } catch (error) {
-    console.error('Error writing books to Google Sheets:', error.message);
-    throw error;
-  }
-}
-
-// Search books by query (title, author, bookId, or category)
+// Search books by query
 async function findBooksByQuery(q) {
   if (!q) return [];
-  
   const books = await readBooks();
   const searchTerm = q.toLowerCase();
-  
   return books.filter(book =>
     (book.title && book.title.toLowerCase().includes(searchTerm)) ||
     (book.author && book.author.toLowerCase().includes(searchTerm)) ||
@@ -89,81 +67,53 @@ async function findBooksByQuery(q) {
   );
 }
 
-// Decrement book copy count when reserved
-async function decrementCopy(bookId) {
-  try {
-    const books = await readBooks();
-    const bookIndex = books.findIndex(b => b.bookId === bookId);
-    
-    if (bookIndex === -1) {
-      throw new Error(`Book not found: ${bookId}`);
-    }
-    
-    if (books[bookIndex].copies_available <= 0) {
-      console.log(`❌ No copies available for ${bookId}`);
-      return false; // No copies available
-    }
-    
-    // Decrement the copy count
-    books[bookIndex].copies_available -= 1;
-    
-    // Write back to Google Sheets
-    await writeBooks(books);
-    
-    console.log(`✅ Decremented copy for ${bookId}. New count: ${books[bookIndex].copies_available}`);
-    return true;
-  } catch (error) {
-    console.error('Error decrementing copy:', error.message);
-    throw error;
-  }
+// Get book by ID
+async function getBookById(bookId) {
+  const books = await readBooks();
+  return books.find(book => book.bookId === bookId);
 }
 
-// Log reservation to Google Sheets (Reservations tab)
-async function logReservation(reservationData) {
-  try {
-    const auth = await getAuthClient();
-    
-    const timestamp = new Date().toLocaleString('en-PH', { 
-      timeZone: 'Asia/Manila',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    });
-
-    const values = [[
-      reservationData.reservationId,
-      reservationData.bookId,
-      reservationData.title || 'N/A',
-      reservationData.studentName,
-      reservationData.studentEmail,
-      timestamp,
-      'Active'
-    ]];
-
-    await sheets.spreadsheets.values.append({
-      auth,
-      spreadsheetId: SHEET_ID,
-      range: 'Reservations!A:G',
-      valueInputOption: 'RAW',
-      resource: { values }
-    });
-
-    console.log('✅ Reservation logged to Google Sheets');
+// Decrement book copy count
+async function decrementCopy(bookId) {
+  const book = mockBooks.find(b => b.bookId === bookId);
+  if (book && book.copies_available > 0) {
+    book.copies_available--;
+    console.log(`✅ Mock: Decremented ${bookId} to ${book.copies_available} copies`);
     return true;
-  } catch (error) {
-    console.error('Error logging reservation:', error.message);
-    // Don't throw - logging failure shouldn't break the reservation
-    return false;
   }
+  console.log(`❌ Mock: No copies available for ${bookId}`);
+  return false;
+}
+
+// Log reservation
+async function logReservation(reservationData) {
+  mockReservations.push({
+    ...reservationData,
+    timestamp: new Date().toISOString()
+  });
+  console.log(`✅ Mock: Reservation logged for ${reservationData.studentEmail}`);
+  console.log(`   Reservation ID: ${reservationData.reservationId}`);
+  console.log(`   Book: ${reservationData.title}`);
+  return true;
+}
+
+// Get all reservations (for testing)
+async function getReservations() {
+  return mockReservations;
+}
+
+// Mock write function
+async function writeBooks(books) {
+  console.log('✅ Mock: Books data would be saved');
+  return true;
 }
 
 module.exports = {
   readBooks,
   writeBooks,
   findBooksByQuery,
+  getBookById,
   decrementCopy,
-  logReservation
+  logReservation,
+  getReservations
 };

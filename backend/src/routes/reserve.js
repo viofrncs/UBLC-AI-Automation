@@ -2,15 +2,16 @@ const express = require('express');
 const router = express.Router();
 const dataService = require('../services/dataService');
 const emailService = require('../services/emailService');
-const zapierService = require('../services/zapierService');
+// Remove zapierService import since we're using n8n
 
 router.post('/', async (req, res) => {
   try {
-    const { bookId, student } = req.body;
+    const { bookId, title, studentName, studentEmail } = req.body;
 
-    if (!bookId || !student || !student.email) {
+    if (!bookId || !studentEmail) {
       return res.status(400).json({ 
-        error: 'bookId and student with email are required' 
+        success: false,
+        error: 'bookId and studentEmail are required' 
       });
     }
 
@@ -19,79 +20,126 @@ router.post('/', async (req, res) => {
     
     if (!book) {
       return res.status(404).json({ 
-        status: 'failed', 
-        message: 'Book not found' 
+        success: false,
+        error: 'Book not found' 
       });
     }
 
-    const ok = await dataService.decrementCopy(bookId);
-    if (!ok) {
+    // Check availability
+    if (book.copies_available <= 0) {
       return res.status(400).json({ 
-        status: 'failed', 
-        message: 'No copies available' 
+        success: false,
+        error: 'No copies available' 
       });
     }
 
-    const reservationId = `RSV-${Date.now()}`;
+    const reservationId = `RES-${Date.now()}`;
 
-    await dataService.logReservation({
+    // Create reservation
+    const reservation = {
       reservationId,
       bookId,
       title: book.title,
-      studentName: student.name || 'Student',
-      studentEmail: student.email
-    });
-
-    await zapierService.sendToZapier({
-      reservationId,
-      bookId,
-      title: book.title,
-      author: book.author,
-      location: book.location,
-      studentName: student.name || 'Student',
-      studentEmail: student.email
-    });
-
-    const emailData = {
-      reservationId,
-      bookId,
-      title: book.title,
-      author: book.author,
-      location: book.location,
-      studentName: student.name || 'Student',
+      studentName: studentName || 'Student',
+      studentEmail,
+      timestamp: new Date().toISOString(),
+      status: 'reserved'
     };
 
+    // Log reservation (in real system, save to Google Sheets)
+    await dataService.logReservation(reservation);
+
+    // Decrement available copies
+    await dataService.decrementCopy(bookId);
+
+    // Send email confirmation
     let emailStatus = 'sent';
     try {
-      await emailService.sendReservationEmail(student.email, emailData);
+      await emailService.sendReservationEmail(studentEmail, {
+        reservationId,
+        bookTitle: book.title,
+        author: book.author,
+        location: book.location,
+        studentName: studentName || 'Student',
+        pickupDeadline: '3 days'
+      });
     } catch (emailErr) {
       console.warn('Failed to send email:', emailErr);
       emailStatus = 'failed';
     }
 
+    // For n8n integration - you can add webhook call here later
+    console.log('Reservation created for n8n workflow:', reservation);
+
     res.json({
-      status: 'success',
+      success: true,
       reservationId,
-      bookTitle: book.title,
-      message: emailStatus === 'sent'
-        ? 'Reserved successfully — confirmation email sent.'
-        : 'Reserved successfully — confirmation email failed.'
+      message: `Successfully reserved "${book.title}"`,
+      details: {
+        bookId,
+        bookTitle: book.title,
+        author: book.author,
+        location: book.location,
+        studentName: studentName || 'Student',
+        studentEmail,
+        reservationDate: new Date().toISOString(),
+        emailStatus,
+        pickupNote: 'Please pick up within 3 days at the library front desk'
+      }
     });
 
   } catch (err) {
     console.error('POST /api/reserve error:', err);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ 
+      success: false,
+      error: 'Internal server error',
+      message: err.message 
+    });
   }
 });
 
+// GET /api/reserve - Get reservation info
 router.get('/', async (req, res) => {
   try {
     res.json({ 
-      message: 'Check Google Sheets Reservations tab for all reservations',
-      sheetUrl: `https://docs.google.com/spreadsheets/d/${process.env.GOOGLE_SHEET_ID}/edit#gid=1`
+      success: true,
+      message: 'UBLC Library Reservation System',
+      instructions: 'Send POST request with bookId, studentName, and studentEmail',
+      example: {
+        method: 'POST',
+        url: '/api/reserve',
+        body: {
+          bookId: 'B001',
+          studentName: 'John Doe',
+          studentEmail: 'john@ublc.edu.ph'
+        }
+      },
+      note: 'Integrated with n8n workflow automation'
     });
   } catch (err) {
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ 
+      success: false,
+      error: 'Internal server error' 
+    });
+  }
+});
+
+// GET /api/reserve/:id - Get specific reservation (mock)
+router.get('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    res.json({
+      success: true,
+      reservationId: id,
+      status: 'reserved',
+      message: 'Reservation details would be fetched from database'
+    });
+  } catch (err) {
+    res.status(500).json({ 
+      success: false,
+      error: 'Internal server error' 
+    });
   }
 });
 
