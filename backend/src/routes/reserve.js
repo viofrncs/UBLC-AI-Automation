@@ -2,16 +2,24 @@ const express = require('express');
 const router = express.Router();
 const dataService = require('../services/dataService');
 const emailService = require('../services/emailService');
-// Remove zapierService import since we're using n8n
 
 router.post('/', async (req, res) => {
   try {
-    const { bookId, title, studentName, studentEmail } = req.body;
+    const { bookId, studentId, studentName, studentEmail } = req.body;
 
-    if (!bookId || !studentEmail) {
+    // VALIDATE REQUIRED FIELDS
+    if (!bookId || !studentId || !studentName || !studentEmail) {
       return res.status(400).json({ 
         success: false,
-        error: 'bookId and studentEmail are required' 
+        error: 'bookId, studentId, studentName, and studentEmail are required' 
+      });
+    }
+
+    // Validate email format
+    if (!studentEmail.includes('@') || !studentEmail.includes('.')) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Invalid email format' 
       });
     }
 
@@ -25,8 +33,8 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // Check availability
-    if (book.copies_available <= 0) {
+    // Check availability - using 'available' field from your Google Sheets
+    if (book.available <= 0) {
       return res.status(400).json({ 
         success: false,
         error: 'No copies available' 
@@ -40,16 +48,17 @@ router.post('/', async (req, res) => {
       reservationId,
       bookId,
       title: book.title,
-      studentName: studentName || 'Student',
+      studentId,
+      studentName,
       studentEmail,
       timestamp: new Date().toISOString(),
       status: 'reserved'
     };
 
-    // Log reservation (in real system, save to Google Sheets)
+    // Log reservation 
     await dataService.logReservation(reservation);
 
-    // Decrement available copies
+    // Decrement available copies - using 'available' field
     await dataService.decrementCopy(bookId);
 
     // Send email confirmation
@@ -60,7 +69,8 @@ router.post('/', async (req, res) => {
         bookTitle: book.title,
         author: book.author,
         location: book.location,
-        studentName: studentName || 'Student',
+        studentName: studentName,
+        studentId: studentId,
         pickupDeadline: '3 days'
       });
     } catch (emailErr) {
@@ -68,8 +78,16 @@ router.post('/', async (req, res) => {
       emailStatus = 'failed';
     }
 
-    // For n8n integration - you can add webhook call here later
-    console.log('Reservation created for n8n workflow:', reservation);
+    // Log for n8n integration
+    console.log('Reservation created for n8n workflow:', {
+      reservationId: reservationId,
+      bookId: bookId,
+      title: book.title,
+      studentName: studentName,
+      studentEmail: studentEmail,
+      timestamp: new Date().toISOString(),
+      status: 'reserved'
+    });
 
     res.json({
       success: true,
@@ -80,7 +98,8 @@ router.post('/', async (req, res) => {
         bookTitle: book.title,
         author: book.author,
         location: book.location,
-        studentName: studentName || 'Student',
+        studentId,
+        studentName,
         studentEmail,
         reservationDate: new Date().toISOString(),
         emailStatus,
@@ -104,14 +123,15 @@ router.get('/', async (req, res) => {
     res.json({ 
       success: true,
       message: 'UBLC Library Reservation System',
-      instructions: 'Send POST request with bookId, studentName, and studentEmail',
+      instructions: 'Send POST request with bookId, studentId, studentName, and studentEmail',
       example: {
         method: 'POST',
         url: '/api/reserve',
         body: {
           bookId: 'B001',
-          studentName: 'John Doe',
-          studentEmail: 'john@ublc.edu.ph'
+          studentId: '2220123',
+          studentName: 'Maria Santos',
+          studentEmail: '2220123@ub.edu.ph'
         }
       },
       note: 'Integrated with n8n workflow automation'
